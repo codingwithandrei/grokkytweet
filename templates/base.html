@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Links Manager</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0E1117;
+            --bg-secondary: #1A1E24;
+            --bg-tertiary: #2D323B;
+            --text-primary: #E6EDF3;
+            --text-secondary: #8B949E;
+            --accent: #2F81F7;
+            --border-radius: 12px;
+            --spacing: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+            width: 100%;
+        }
+
+        .container {
+            width: 100%;
+            padding: var(--spacing);
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: var(--spacing);
+            padding: var(--spacing);
+            background-color: var(--bg-secondary);
+            border-radius: var(--border-radius);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 100%;
+        }
+
+        .add-form {
+            display: flex;
+            gap: var(--spacing);
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        input[type="text"], input[type="url"], select {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--text-secondary);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: var(--border-radius);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+            min-width: 200px;
+        }
+
+        input[type="text"]:focus, input[type="url"]:focus, select:focus {
+            border-color: var(--accent);
+        }
+
+        button {
+            background-color: var(--accent);
+            color: var(--text-primary);
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity 0.2s;
+            white-space: nowrap;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        .btn-delete {
+            background-color: transparent;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+        }
+
+        .btn-delete:hover {
+            color: #E5534B;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: var(--spacing);
+            margin-top: var(--spacing);
+            width: 100%;
+        }
+
+        .category-card {
+            background-color: var(--bg-secondary);
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            cursor: move;
+            transition: box-shadow 0.2s;
+        }
+
+        .category-card.sortable-ghost {
+            opacity: 0.5;
+        }
+
+        .category-card:hover {
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .category-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--spacing);
+            background-color: var(--bg-tertiary);
+        }
+
+        .category-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        @media (max-width: 1600px) {
+            .row {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .row {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 900px) {
+            .row {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: var(--spacing);
+            }
+            
+            .add-form {
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <form action="{{ url_for('add_tweet') }}" method="post" class="add-form">
+                <input type="url" name="tweet_url" placeholder="Enter tweet URL" required>
+                <select name="category_id" required>
+                    <option value="">Select category</option>
+                    {% for category in categories %}
+                        <option value="{{ category.id }}">{{ category.name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">Add Tweet</button>
+            </form>
+            <form action="{{ url_for('add_category') }}" method="post" class="add-form">
+                <input type="text" name="name" placeholder="New category name" required>
+                <button type="submit">Add Category</button>
+            </form>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        // Auto-hide flash messages after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            const flashMessages = document.querySelectorAll('.flash');
+            flashMessages.forEach(function(message) {
+                setTimeout(function() {
+                    message.style.opacity = '0';
+                    message.style.transform = 'translateX(100%)';
+                    setTimeout(function() {
+                        message.remove();
+                    }, 300);
+                }, 5000);
+            });
+
+            // Initialize drag and drop for categories
+            const categoryRow = document.querySelector('.row');
+            if (categoryRow) {
+                new Sortable(categoryRow, {
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    onEnd: function(evt) {
+                        const categoryIds = Array.from(evt.to.children).map(el => el.dataset.categoryId);
+                        // Send the new order to the server
+                        fetch('/update_category_order', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ order: categoryIds })
+                        });
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

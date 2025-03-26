@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row" data-category-count="{{ categories|length }}">
+  {% for category in categories %}
+    <div class="category-column" data-category-id="{{ category.id }}">
+      <div class="category-card">
+        <div class="category-header">
+          <h5 class="category-title">{{ category.name }}</h5>
+          <form action="{{ url_for('delete_category', category_id=category.id) }}" method="post" class="d-inline" onsubmit="return confirm('Delete this category and all its tweets?');">
+            <button type="submit" class="btn-delete"><i class="fas fa-trash"></i></button>
+          </form>
+        </div>
+        <div class="tweets-container">
+          {% for tweet in category.tweets %}
+            <a href="{{ tweet.original_url }}" target="_blank" class="tweet-link">
+              <div class="tweet-bubble">
+                <div class="tweet-header">
+                  <div class="tweet-author">
+                    {% if tweet.username %}
+                      <strong>@{{ tweet.username }}</strong>
+                    {% else %}
+                      <strong>{{ tweet.author }}</strong>
+                    {% endif %}
+                  </div>
+                  <div class="tweet-uploader">Added by {{ tweet.added_by }}</div>
+                </div>
+                {% if tweet.tweet_text %}
+                  <div class="tweet-content">{{ tweet.tweet_text }}</div>
+                {% endif %}
+                {% if tweet.media_urls %}
+                  <div class="tweet-media">
+                    {% for url in tweet.media_urls.split(',') %}
+                      {% if url %}
+                        <div class="media-container">
+                          <img src="{{ url }}" alt="Tweet Media" loading="lazy" onerror="this.parentElement.style.display='none'">
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% endif %}
+                <div class="tweet-footer">
+                  <form action="{{ url_for('delete_tweet', tweet_id=tweet.id) }}" method="post" onsubmit="return confirm('Delete this tweet?'); event.stopPropagation();">
+                    <button type="submit" class="btn-delete" onclick="event.stopPropagation();"><i class="fas fa-times"></i></button>
+                  </form>
+                </div>
+              </div>
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<style>
+.category-column {
+  height: fit-content;
+}
+
+.tweets-container {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-secondary) var(--bg-secondary);
+  padding: var(--spacing);
+}
+
+.tweets-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tweets-container::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+.tweets-container::-webkit-scrollbar-thumb {
+  background-color: var(--text-secondary);
+  border-radius: 3px;
+}
+
+.category-header {
+  position: relative;
+  margin-bottom: var(--spacing);
+  padding-bottom: var(--spacing);
+  border-bottom: 1px solid var(--bg-tertiary);
+}
+
+.category-header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.tweet-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  margin-bottom: var(--spacing);
+}
+
+.tweet-link:last-child {
+  margin-bottom: 0;
+}
+
+.tweet-bubble {
+  background: var(--bg-tertiary);
+  border-radius: var(--border-radius);
+  padding: var(--spacing);
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tweet-bubble:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.tweet-header {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tweet-author {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tweet-uploader {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.tweet-content {
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.4;
+  margin: 12px 0;
+  white-space: pre-wrap;
+}
+
+.tweet-media {
+  margin-top: 12px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.media-container {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9 aspect ratio */
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.media-container img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--bg-secondary);
+}
+
+.tweet-footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+@media (max-width: 768px) {
+  .tweets-container {
+    max-height: none;
+  }
+  
+  .media-container {
+    padding-bottom: 75%; /* 4:3 aspect ratio for mobile */
+  }
+}
+</style>
+{% endblock %}
