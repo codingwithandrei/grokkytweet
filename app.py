@@ -18,10 +18,15 @@ app.config.from_object(Config)
 # Initialize Firebase
 db = initialize_firebase()
 
+# Define MEDIA_FOLDER for both environments
+MEDIA_FOLDER = os.path.join(app.static_folder, 'media')
+
 # Only create media directory in development, not on Vercel
-if not os.getenv('VERCEL'):
-    MEDIA_FOLDER = os.path.join(app.static_folder, 'media')
-    os.makedirs(MEDIA_FOLDER, exist_ok=True)
+if not os.getenv('VERCEL') and not app.config.get('TESTING'):
+    try:
+        os.makedirs(MEDIA_FOLDER, exist_ok=True)
+    except OSError:
+        app.logger.warning("Could not create media directory - continuing without it")
 
 # --- HTTP Basic Authentication ---
 def check_auth(username, password):
@@ -107,42 +112,55 @@ def download_media(url):
     """Download media from URL and save to storage"""
     if not url:
         return None
+
+    try:
+        # Generate a unique filename
+        filename = secure_filename(hashlib.md5(url.encode()).hexdigest())
         
-    # Generate a unique filename
-    filename = secure_filename(hashlib.md5(url.encode()).hexdigest())
-    
-    # If running on Vercel, use Firebase Storage
-    if os.getenv('VERCEL'):
-        # Store URL directly in Firestore
-        return url
-    else:
-        # Local development: save file to disk
-        local_path = os.path.join(MEDIA_FOLDER, filename)
-        if not os.path.exists(local_path):
-            response = requests.get(url)
-            if response.status_code == 200:
-                with open(local_path, 'wb') as f:
-                    f.write(response.content)
+        # If running on Vercel or can't write to filesystem, return original URL
+        if os.getenv('VERCEL') or app.config.get('TESTING'):
+            return url
+            
+        # Local development: try to save file to disk
+        try:
+            local_path = os.path.join(MEDIA_FOLDER, filename)
+            if not os.path.exists(local_path):
+                response = requests.get(url)
+                if response.status_code == 200:
+                    with open(local_path, 'wb') as f:
+                        f.write(response.content)
+                    return f'/static/media/{filename}'
+            else:
                 return f'/static/media/{filename}'
-        else:
-            return f'/static/media/{filename}'
-    return None
+        except OSError:
+            # If we can't write to filesystem, fall back to original URL
+            app.logger.warning(f"Could not save media to disk, using original URL: {url}")
+            return url
+    except Exception as e:
+        app.logger.error(f"Error in download_media: {str(e)}")
+        return url
 
 def delete_media(local_url):
     """Delete media file from storage"""
     if not local_url:
         return
         
-    # If running on Vercel, no need to delete as we store original URLs
-    if os.getenv('VERCEL'):
+    # If running on Vercel or testing, no need to delete
+    if os.getenv('VERCEL') or app.config.get('TESTING'):
         return
         
-    # Local development: delete from disk
-    if local_url.startswith('/static/media/'):
-        filename = local_url.split('/')[-1]
-        file_path = os.path.join(MEDIA_FOLDER, filename)
-        if os.path.exists(file_path):
-            os.remove(file_path)
+    try:
+        # Local development: try to delete from disk
+        if local_url.startswith('/static/media/'):
+            filename = local_url.split('/')[-1]
+            file_path = os.path.join(MEDIA_FOLDER, filename)
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    app.logger.warning(f"Could not delete media file: {file_path}")
+    except Exception as e:
+        app.logger.error(f"Error in delete_media: {str(e)}")
 
 @app.route("/add_tweet", methods=["POST"])
 @requires_auth
