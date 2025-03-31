@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, abo
 from config import Config
 from werkzeug.security import check_password_hash
 from functools import wraps
-from models import Category, Tweet
+from firebase_config import initialize_firebase
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -14,6 +14,9 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# Initialize Firebase
+db = initialize_firebase()
 
 # Create media directory if it doesn't exist
 MEDIA_FOLDER = os.path.join(app.static_folder, 'media')
