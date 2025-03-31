@@ -12,7 +12,6 @@ import re
 from urllib.parse import urlparse
 from werkzeug.utils import secure_filename
 import logging
-from google.cloud.firestore import FieldPath
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
