@@ -12,6 +12,7 @@ import re
 from urllib.parse import urlparse
 from werkzeug.utils import secure_filename
 import logging
+from google.cloud.firestore import FieldPath
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -92,11 +93,21 @@ def index():
     try:
         # Get categories ordered by position from Firestore
         categories_ref = db.collection('categories').order_by('position').stream()
-        categories = [{"id": doc.id, **doc.to_dict()} for doc in categories_ref]
+        categories = []
+        
+        for cat_doc in categories_ref:
+            category = {"id": cat_doc.id, **cat_doc.to_dict(), "tweets": []}
+            
+            # Get tweets for this category
+            tweets_ref = db.collection('tweets').where('category', '==', cat_doc.id).stream()
+            category["tweets"] = [{"id": tweet.id, **tweet.to_dict()} for tweet in tweets_ref]
+            
+            categories.append(category)
+            
         return render_template("index.html", categories=categories)
     except Exception as e:
         logger.error(f"Error in index route: {str(e)}")
-        return "An error occurred while loading categories. Please try again.", 500
+        return f"An error occurred while loading categories. Please try again. Error: {str(e)}", 500
 
 @app.before_first_request
 def create_tables():
