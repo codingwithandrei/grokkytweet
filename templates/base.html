@@ -207,35 +207,37 @@
     </div>
 
     <script>
-        // Auto-hide flash messages after 5 seconds
         document.addEventListener('DOMContentLoaded', function() {
-            const flashMessages = document.querySelectorAll('.flash');
-            flashMessages.forEach(function(message) {
-                setTimeout(function() {
-                    message.style.opacity = '0';
-                    message.style.transform = 'translateX(100%)';
-                    setTimeout(function() {
-                        message.remove();
-                    }, 300);
-                }, 5000);
-            });
-
             // Initialize drag and drop for categories
             const categoryRow = document.querySelector('.row');
             if (categoryRow) {
                 new Sortable(categoryRow, {
                     animation: 150,
                     ghostClass: 'sortable-ghost',
-                    onEnd: function(evt) {
+                    onEnd: async function(evt) {
                         const categoryIds = Array.from(evt.to.children).map(el => el.dataset.categoryId);
-                        // Send the new order to the server
-                        fetch('/update_category_order', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({ order: categoryIds })
-                        });
+                        try {
+                            // Get current auth credentials
+                            const auth = btoa(prompt('Please enter your username') + ':' + prompt('Please enter your password'));
+                            
+                            // Send the new order to the server with auth
+                            const response = await fetch('/update_category_order', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': 'Basic ' + auth
+                                },
+                                body: JSON.stringify({ order: categoryIds })
+                            });
+                            
+                            if (!response.ok) {
+                                throw new Error('Failed to update category order');
+                            }
+                        } catch (error) {
+                            console.error('Error updating category order:', error);
+                            // Reload the page to restore original order
+                            window.location.reload();
+                        }
                     }
                 });
             }
