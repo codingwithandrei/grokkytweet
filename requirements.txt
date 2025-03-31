@@ -7,4 +7,3 @@ beautifulsoup4==4.11.0
 Werkzeug==2.2.0
 gunicorn==21.2.0  # For production deployment
 firebase-admin==6.2.0  # For Firebase integration
-SQLAlchemy==1.4.41  # This specific version is required for Flask-SQLAlchemy 2.5.1
