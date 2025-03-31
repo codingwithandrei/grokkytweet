@@ -137,71 +137,31 @@ def add_category():
         logger.error(f"Error in add_category route: {str(e)}")
         return "An error occurred while adding category. Please try again.", 500
 
-@app.route("/delete_category/<int:category_id>", methods=["POST"])
+@app.route("/delete_category/<category_id>", methods=["POST"])
 @requires_auth
 def delete_category(category_id):
     try:
-        category_ref = db.collection('categories').document(str(category_id))
+        # Get tweets for this category first
+        tweets_ref = db.collection('tweets').where('category', '==', category_id).stream()
+        
+        # Delete all tweets in this category
+        for tweet in tweets_ref:
+            # Delete associated media files
+            if tweet.to_dict().get('media_urls'):
+                for url in tweet.to_dict().get('media_urls').split(','):
+                    delete_media(url)
+            # Delete the tweet document
+            db.collection('tweets').document(tweet.id).delete()
+        
+        # Now delete the category
+        category_ref = db.collection('categories').document(category_id)
         category_ref.delete()
+        
         flash("Category deleted.", "success")
         return redirect(url_for("index"))
     except Exception as e:
         logger.error(f"Error in delete_category route: {str(e)}")
-        return "An error occurred while deleting category. Please try again.", 500
-
-def download_media(url):
-    """Download media from URL and save to storage"""
-    if not url:
-        return None
-
-    try:
-        # Generate a unique filename
-        filename = secure_filename(hashlib.md5(url.encode()).hexdigest())
-        
-        # If running on Vercel or can't write to filesystem, return original URL
-        if os.getenv('VERCEL') or app.config.get('TESTING'):
-            return url
-            
-        # Local development: try to save file to disk
-        try:
-            local_path = os.path.join(MEDIA_FOLDER, filename)
-            if not os.path.exists(local_path):
-                response = requests.get(url)
-                if response.status_code == 200:
-                    with open(local_path, 'wb') as f:
-                        f.write(response.content)
-                    return f'/static/media/{filename}'
-            else:
-                return f'/static/media/{filename}'
-        except OSError:
-            # If we can't write to filesystem, fall back to original URL
-            logger.warning(f"Could not save media to disk, using original URL: {url}")
-            return url
-    except Exception as e:
-        logger.error(f"Error in download_media: {str(e)}")
-        return url
-
-def delete_media(local_url):
-    """Delete media file from storage"""
-    if not local_url:
-        return
-        
-    # If running on Vercel or testing, no need to delete
-    if os.getenv('VERCEL') or app.config.get('TESTING'):
-        return
-        
-    try:
-        # Local development: try to delete from disk
-        if local_url.startswith('/static/media/'):
-            filename = local_url.split('/')[-1]
-            file_path = os.path.join(MEDIA_FOLDER, filename)
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except OSError:
-                    logger.warning(f"Could not delete media file: {file_path}")
-    except Exception as e:
-        logger.error(f"Error in delete_media: {str(e)}")
+        return f"An error occurred while deleting category. Please try again. Error: {str(e)}", 500
 
 @app.route("/add_tweet", methods=["POST"])
 @requires_auth
@@ -267,12 +227,16 @@ def add_tweet():
         logger.error(f"Error in add_tweet route: {str(e)}")
         return "An error occurred while adding tweet. Please try again.", 500
 
-@app.route("/delete_tweet/<int:tweet_id>", methods=["POST"])
+@app.route("/delete_tweet/<tweet_id>", methods=["POST"])
 @requires_auth
 def delete_tweet(tweet_id):
     try:
-        tweet_ref = db.collection('tweets').document(str(tweet_id))
+        tweet_ref = db.collection('tweets').document(tweet_id)
         tweet = tweet_ref.get()
+        
+        if not tweet.exists:
+            flash("Tweet not found.", "error")
+            return redirect(url_for("index"))
         
         # Delete associated media files
         if tweet.to_dict().get('media_urls'):
@@ -284,7 +248,7 @@ def delete_tweet(tweet_id):
         return redirect(url_for("index"))
     except Exception as e:
         logger.error(f"Error in delete_tweet route: {str(e)}")
-        return "An error occurred while deleting tweet. Please try again.", 500
+        return f"An error occurred while deleting tweet. Please try again. Error: {str(e)}", 500
 
 @app.route("/update_category_order", methods=["POST"])
 @requires_auth
@@ -303,6 +267,60 @@ def update_category_order():
     except Exception as e:
         logger.error(f"Error in update_category_order route: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+def download_media(url):
+    """Download media from URL and save to storage"""
+    if not url:
+        return None
+
+    try:
+        # Generate a unique filename
+        filename = secure_filename(hashlib.md5(url.encode()).hexdigest())
+        
+        # If running on Vercel or can't write to filesystem, return original URL
+        if os.getenv('VERCEL') or app.config.get('TESTING'):
+            return url
+            
+        # Local development: try to save file to disk
+        try:
+            local_path = os.path.join(MEDIA_FOLDER, filename)
+            if not os.path.exists(local_path):
+                response = requests.get(url)
+                if response.status_code == 200:
+                    with open(local_path, 'wb') as f:
+                        f.write(response.content)
+                    return f'/static/media/{filename}'
+            else:
+                return f'/static/media/{filename}'
+        except OSError:
+            # If we can't write to filesystem, fall back to original URL
+            logger.warning(f"Could not save media to disk, using original URL: {url}")
+            return url
+    except Exception as e:
+        logger.error(f"Error in download_media: {str(e)}")
+        return url
+
+def delete_media(local_url):
+    """Delete media file from storage"""
+    if not local_url:
+        return
+        
+    # If running on Vercel or testing, no need to delete
+    if os.getenv('VERCEL') or app.config.get('TESTING'):
+        return
+        
+    try:
+        # Local development: try to delete from disk
+        if local_url.startswith('/static/media/'):
+            filename = local_url.split('/')[-1]
+            file_path = os.path.join(MEDIA_FOLDER, filename)
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    logger.warning(f"Could not delete media file: {file_path}")
+    except Exception as e:
+        logger.error(f"Error in delete_media: {str(e)}")
 
 def scrape_tweet(url):
     headers = {
