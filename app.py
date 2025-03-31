@@ -1,9 +1,7 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, abort, jsonify
-from extensions import db
+from flask import Flask, render_template, request, redirect, url_for, flash, abort, jsonify, Response
 from config import Config
 from werkzeug.security import check_password_hash
 from functools import wraps
-from flask_migrate import Migrate
 from models import Category, Tweet
 import requests
 from bs4 import BeautifulSoup
@@ -16,22 +14,12 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config.from_object(Config)
-db.init_app(app)
-
-# Create database tables
-with app.app_context():
-    db.drop_all()  # Drop all tables
-    db.create_all()  # Create new tables
-
-migrate = Migrate(app, db)
 
 # Create media directory if it doesn't exist
 MEDIA_FOLDER = os.path.join(app.static_folder, 'media')
 os.makedirs(MEDIA_FOLDER, exist_ok=True)
 
 # --- HTTP Basic Authentication ---
-from flask import Response
-
 def check_auth(username, password):
     # Get base credentials
     if username == app.config.get("BASIC_AUTH_USERNAME"):
@@ -77,8 +65,7 @@ def requires_auth(f):
 
 @app.before_first_request
 def create_tables():
-    with app.app_context():
-        db.create_all()
+    pass
 
 @app.route("/")
 @requires_auth
@@ -93,10 +80,12 @@ def add_category():
     name = request.form.get("name", "").strip()
     if name:
         # Get the highest position
-        max_position = db.session.query(db.func.max(Category.position)).scalar() or -1
+        max_position = 0
+        for category in Category.query.all():
+            if category.position > max_position:
+                max_position = category.position
         category = Category(name=name, position=max_position + 1)
-        db.session.add(category)
-        db.session.commit()
+        category.save()
         flash("Category added successfully.", "success")
     else:
         flash("Category name cannot be empty.", "danger")
@@ -105,9 +94,8 @@ def add_category():
 @app.route("/delete_category/<int:category_id>", methods=["POST"])
 @requires_auth
 def delete_category(category_id):
-    category = Category.query.get_or_404(category_id)
-    db.session.delete(category)
-    db.session.commit()
+    category = Category.get(category_id)
+    category.delete()
     flash("Category deleted.", "success")
     return redirect(url_for("index"))
 
@@ -159,10 +147,9 @@ def add_tweet():
         category = Category.query.filter_by(name=new_category_name).first()
         if not category:
             category = Category(name=new_category_name)
-            db.session.add(category)
-            db.session.commit()
+            category.save()
     elif category_id:
-        category = Category.query.get(category_id)
+        category = Category.get(category_id)
     else:
         flash("No category selected or provided.", "danger")
         return redirect(url_for("index"))
@@ -194,8 +181,7 @@ def add_tweet():
                 added_by=added_by
             )
             
-            db.session.add(new_tweet)
-            db.session.commit()
+            new_tweet.save()
             flash("Tweet added successfully.", "success")
         else:
             flash("Failed to fetch tweet data.", "danger")
@@ -206,15 +192,14 @@ def add_tweet():
 @app.route("/delete_tweet/<int:tweet_id>", methods=["POST"])
 @requires_auth
 def delete_tweet(tweet_id):
-    tweet = Tweet.query.get_or_404(tweet_id)
+    tweet = Tweet.get(tweet_id)
     
     # Delete associated media files
     if tweet.media_urls:
         for url in tweet.media_urls.split(','):
             delete_media(url)
     
-    db.session.delete(tweet)
-    db.session.commit()
+    tweet.delete()
     flash("Tweet deleted successfully.", "success")
     return redirect(url_for("index"))
 
@@ -226,13 +211,12 @@ def update_category_order():
         try:
             # Update each category's position
             for position, category_id in enumerate(order):
-                category = Category.query.get(int(category_id))
+                category = Category.get(int(category_id))
                 if category:
                     category.position = position
-            db.session.commit()
+                    category.save()
             return jsonify({"success": True})
         except Exception as e:
-            db.session.rollback()
             return jsonify({"success": False, "error": str(e)}), 500
     return jsonify({"success": False, "error": "No order provided"}), 400
 
