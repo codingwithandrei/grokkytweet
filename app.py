@@ -11,12 +11,22 @@ import os
 import re
 from urllib.parse import urlparse
 from werkzeug.utils import secure_filename
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Initialize Firebase
-db = initialize_firebase()
+try:
+    # Initialize Firebase
+    db = initialize_firebase()
+    logger.info("Firebase initialized successfully")
+except Exception as e:
+    logger.error(f"Error initializing Firebase: {str(e)}")
+    db = None
 
 # Define MEDIA_FOLDER for both environments
 MEDIA_FOLDER = os.path.join(app.static_folder, 'media')
@@ -26,34 +36,38 @@ if not os.getenv('VERCEL') and not app.config.get('TESTING'):
     try:
         os.makedirs(MEDIA_FOLDER, exist_ok=True)
     except OSError:
-        app.logger.warning("Could not create media directory - continuing without it")
+        logger.warning("Could not create media directory - continuing without it")
 
 # --- HTTP Basic Authentication ---
 def check_auth(username, password):
-    # Get base credentials
-    if username == app.config.get("BASIC_AUTH_USERNAME"):
-        return check_password_hash(app.config.get("BASIC_AUTH_PASSWORD_HASH"), password)
-    
-    # Check for additional numbered users (username2, username3, etc.)
-    user_num = 2
-    while True:
-        username_key = f"BASIC_AUTH_USERNAME{user_num}"
-        password_hash_key = f"BASIC_AUTH_PASSWORD_HASH{user_num}"
+    try:
+        # Get base credentials for user1
+        if username == app.config.get("BASIC_AUTH_USERNAME1"):
+            return check_password_hash(app.config.get("BASIC_AUTH_PASSWORD_HASH1"), password)
         
-        stored_username = app.config.get(username_key)
-        stored_hash = app.config.get(password_hash_key)
+        # Check for additional numbered users (username2, username3, etc.)
+        user_num = 2
+        while True:
+            username_key = f"BASIC_AUTH_USERNAME{user_num}"
+            password_hash_key = f"BASIC_AUTH_PASSWORD_HASH{user_num}"
+            
+            stored_username = app.config.get(username_key)
+            stored_hash = app.config.get(password_hash_key)
+            
+            # If we don't find the next numbered user, we're done checking
+            if not stored_username or not stored_hash:
+                break
+                
+            if username == stored_username:
+                return check_password_hash(stored_hash, password)
+                
+            user_num += 1
         
-        # If we don't find the next numbered user, we're done checking
-        if not stored_username or not stored_hash:
-            break
-            
-        if username == stored_username:
-            return check_password_hash(stored_hash, password)
-            
-        user_num += 1
-    
-    app.logger.info(f"No matching credentials found for username: {username}")
-    return False
+        logger.info(f"No matching credentials found for username: {username}")
+        return False
+    except Exception as e:
+        logger.error(f"Error in authentication: {str(e)}")
+        return False
 
 def authenticate():
     return Response(
@@ -72,41 +86,58 @@ def requires_auth(f):
 
 # --- Routes ---
 
+@app.route("/")
+@requires_auth
+def index():
+    try:
+        # Get categories ordered by position from Firestore
+        categories_ref = db.collection('categories').order_by('position').stream()
+        categories = [{"id": doc.id, **doc.to_dict()} for doc in categories_ref]
+        return render_template("index.html", categories=categories)
+    except Exception as e:
+        logger.error(f"Error in index route: {str(e)}")
+        return "An error occurred while loading categories. Please try again.", 500
+
 @app.before_first_request
 def create_tables():
     pass
 
-@app.route("/")
-@requires_auth
-def index():
-    # Get categories ordered by position
-    categories = Category.query.order_by(Category.position).all()
-    return render_template("index.html", categories=categories)
-
 @app.route("/add_category", methods=["POST"])
 @requires_auth
 def add_category():
-    name = request.form.get("name", "").strip()
-    if name:
-        # Get the highest position
-        max_position = 0
-        for category in Category.query.all():
-            if category.position > max_position:
-                max_position = category.position
-        category = Category(name=name, position=max_position + 1)
-        category.save()
-        flash("Category added successfully.", "success")
-    else:
-        flash("Category name cannot be empty.", "danger")
-    return redirect(url_for("index"))
+    try:
+        name = request.form.get("name", "").strip()
+        if name:
+            # Get the highest position
+            max_position = 0
+            categories_ref = db.collection('categories').stream()
+            for category in categories_ref:
+                if category.to_dict().get('position', 0) > max_position:
+                    max_position = category.to_dict().get('position', 0)
+            category_ref = db.collection('categories').document()
+            category_ref.set({
+                'name': name,
+                'position': max_position + 1
+            })
+            flash("Category added successfully.", "success")
+        else:
+            flash("Category name cannot be empty.", "danger")
+        return redirect(url_for("index"))
+    except Exception as e:
+        logger.error(f"Error in add_category route: {str(e)}")
+        return "An error occurred while adding category. Please try again.", 500
 
 @app.route("/delete_category/<int:category_id>", methods=["POST"])
 @requires_auth
 def delete_category(category_id):
-    category = Category.get(category_id)
-    category.delete()
-    flash("Category deleted.", "success")
-    return redirect(url_for("index"))
+    try:
+        category_ref = db.collection('categories').document(str(category_id))
+        category_ref.delete()
+        flash("Category deleted.", "success")
+        return redirect(url_for("index"))
+    except Exception as e:
+        logger.error(f"Error in delete_category route: {str(e)}")
+        return "An error occurred while deleting category. Please try again.", 500
 
 def download_media(url):
     """Download media from URL and save to storage"""
@@ -134,10 +165,10 @@ def download_media(url):
                 return f'/static/media/{filename}'
         except OSError:
             # If we can't write to filesystem, fall back to original URL
-            app.logger.warning(f"Could not save media to disk, using original URL: {url}")
+            logger.warning(f"Could not save media to disk, using original URL: {url}")
             return url
     except Exception as e:
-        app.logger.error(f"Error in download_media: {str(e)}")
+        logger.error(f"Error in download_media: {str(e)}")
         return url
 
 def delete_media(local_url):
@@ -158,94 +189,110 @@ def delete_media(local_url):
                 try:
                     os.remove(file_path)
                 except OSError:
-                    app.logger.warning(f"Could not delete media file: {file_path}")
+                    logger.warning(f"Could not delete media file: {file_path}")
     except Exception as e:
-        app.logger.error(f"Error in delete_media: {str(e)}")
+        logger.error(f"Error in delete_media: {str(e)}")
 
 @app.route("/add_tweet", methods=["POST"])
 @requires_auth
 def add_tweet():
-    tweet_url = request.form.get("tweet_url", "").strip()
-    category_id = request.form.get("category_id")
-    new_category_name = request.form.get("new_category")
-    
-    # Decide which category to use
-    if new_category_name:
-        category = Category.query.filter_by(name=new_category_name).first()
-        if not category:
-            category = Category(name=new_category_name)
-            category.save()
-    elif category_id:
-        category = Category.get(category_id)
-    else:
-        flash("No category selected or provided.", "danger")
-        return redirect(url_for("index"))
-    
-    if tweet_url:
-        # Delay to avoid overwhelming Twitter's servers.
-        time.sleep(2)
-        tweet_data = scrape_tweet(tweet_url)
-        if tweet_data:
-            # Download media files and get local URLs
-            local_media_urls = []
-            if tweet_data.get("media"):
-                for url in tweet_data["media"]:
-                    local_url = download_media(url)
-                    if local_url:
-                        local_media_urls.append(local_url)
-            
-            auth = request.authorization
-            added_by = auth.username if auth else "unknown"
-            
-            new_tweet = Tweet(
-                tweet_text=tweet_data["text"],
-                author=tweet_data["author"],
-                username=tweet_data["username"],
-                timestamp=tweet_data["timestamp"],
-                media_urls=",".join(local_media_urls) if local_media_urls else None,
-                category=category,
-                original_url=tweet_url,
-                added_by=added_by
-            )
-            
-            new_tweet.save()
-            flash("Tweet added successfully.", "success")
+    try:
+        tweet_url = request.form.get("tweet_url", "").strip()
+        category_id = request.form.get("category_id")
+        new_category_name = request.form.get("new_category")
+        
+        # Decide which category to use
+        if new_category_name:
+            category_ref = db.collection('categories').where('name', '==', new_category_name).stream()
+            category = next(category_ref, None)
+            if not category:
+                category_ref = db.collection('categories').document()
+                category_ref.set({
+                    'name': new_category_name,
+                    'position': 0
+                })
+                category = category_ref
+        elif category_id:
+            category_ref = db.collection('categories').document(str(category_id))
+            category = category_ref.get()
         else:
-            flash("Failed to fetch tweet data.", "danger")
-    else:
-        flash("Tweet URL cannot be empty.", "danger")
-    return redirect(url_for("index"))
+            flash("No category selected or provided.", "danger")
+            return redirect(url_for("index"))
+        
+        if tweet_url:
+            # Delay to avoid overwhelming Twitter's servers.
+            time.sleep(2)
+            tweet_data = scrape_tweet(tweet_url)
+            if tweet_data:
+                # Download media files and get local URLs
+                local_media_urls = []
+                if tweet_data.get("media"):
+                    for url in tweet_data["media"]:
+                        local_url = download_media(url)
+                        if local_url:
+                            local_media_urls.append(local_url)
+                
+                auth = request.authorization
+                added_by = auth.username if auth else "unknown"
+                
+                tweet_ref = db.collection('tweets').document()
+                tweet_ref.set({
+                    'tweet_text': tweet_data["text"],
+                    'author': tweet_data["author"],
+                    'username': tweet_data["username"],
+                    'timestamp': tweet_data["timestamp"],
+                    'media_urls': ",".join(local_media_urls) if local_media_urls else None,
+                    'category': category.id,
+                    'original_url': tweet_url,
+                    'added_by': added_by
+                })
+                
+                flash("Tweet added successfully.", "success")
+            else:
+                flash("Failed to fetch tweet data.", "danger")
+        else:
+            flash("Tweet URL cannot be empty.", "danger")
+        return redirect(url_for("index"))
+    except Exception as e:
+        logger.error(f"Error in add_tweet route: {str(e)}")
+        return "An error occurred while adding tweet. Please try again.", 500
 
 @app.route("/delete_tweet/<int:tweet_id>", methods=["POST"])
 @requires_auth
 def delete_tweet(tweet_id):
-    tweet = Tweet.get(tweet_id)
-    
-    # Delete associated media files
-    if tweet.media_urls:
-        for url in tweet.media_urls.split(','):
-            delete_media(url)
-    
-    tweet.delete()
-    flash("Tweet deleted successfully.", "success")
-    return redirect(url_for("index"))
+    try:
+        tweet_ref = db.collection('tweets').document(str(tweet_id))
+        tweet = tweet_ref.get()
+        
+        # Delete associated media files
+        if tweet.to_dict().get('media_urls'):
+            for url in tweet.to_dict().get('media_urls').split(','):
+                delete_media(url)
+        
+        tweet_ref.delete()
+        flash("Tweet deleted successfully.", "success")
+        return redirect(url_for("index"))
+    except Exception as e:
+        logger.error(f"Error in delete_tweet route: {str(e)}")
+        return "An error occurred while deleting tweet. Please try again.", 500
 
 @app.route("/update_category_order", methods=["POST"])
 @requires_auth
 def update_category_order():
-    order = request.json.get("order", [])
-    if order:
-        try:
+    try:
+        order = request.json.get("order", [])
+        if order:
             # Update each category's position
             for position, category_id in enumerate(order):
-                category = Category.get(int(category_id))
-                if category:
-                    category.position = position
-                    category.save()
+                category_ref = db.collection('categories').document(str(category_id))
+                category_ref.update({
+                    'position': position
+                })
             return jsonify({"success": True})
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e)}), 500
-    return jsonify({"success": False, "error": "No order provided"}), 400
+        return jsonify({"success": False, "error": "No order provided"}), 400
+    except Exception as e:
+        logger.error(f"Error in update_category_order route: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 def scrape_tweet(url):
     headers = {
@@ -262,7 +309,7 @@ def scrape_tweet(url):
         "Cache-Control": "max-age=0"
     }
     try:
-        app.logger.info(f"Attempting to fetch tweet from URL: {url}")
+        logger.info(f"Attempting to fetch tweet from URL: {url}")
         
         # First try to get the tweet page directly
         response = requests.get(url, headers=headers, timeout=10)
@@ -400,19 +447,19 @@ def scrape_tweet(url):
             "media": media
         }
         
-        app.logger.info("Successfully extracted tweet data:")
-        app.logger.info(f"Author: {author}")
-        app.logger.info(f"Username: {username}")
-        app.logger.info(f"Timestamp: {timestamp}")
-        app.logger.info(f"Media URLs: {media}")
+        logger.info("Successfully extracted tweet data:")
+        logger.info(f"Author: {author}")
+        logger.info(f"Username: {username}")
+        logger.info(f"Timestamp: {timestamp}")
+        logger.info(f"Media URLs: {media}")
         
         return result
         
     except requests.exceptions.RequestException as e:
-        app.logger.error(f"Network error while fetching tweet: {e}")
+        logger.error(f"Network error while fetching tweet: {e}")
         return None
     except Exception as e:
-        app.logger.error(f"Unexpected error while scraping tweet: {e}")
+        logger.error(f"Unexpected error while scraping tweet: {e}")
         return None
 
 if __name__ == "__main__":
